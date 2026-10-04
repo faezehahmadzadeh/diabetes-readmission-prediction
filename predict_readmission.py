@@ -4,8 +4,10 @@ Diabetes hospital readmission prediction (within 30 days).
 Dataset: UCI Diabetes 130-US Hospitals (1999-2008), 101,766 encounters.
 Target: readmitted == "<30"  -> 1, otherwise 0.
 
-Models compared: Logistic Regression and Random Forest
-(both with class_weight="balanced" because only ~11% are readmitted <30d).
+Models compared: Logistic Regression, Decision Tree, Random Forest,
+Gradient Boosting, and K-Nearest Neighbors (all with balanced handling of
+the minority class where the model supports it, because only ~11% are
+readmitted <30d).
 
 To keep run time manageable we train on a stratified random sample of
 30,000 encounters (stated in README). Remove SAMPLE_N to use all data.
@@ -20,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -28,8 +30,10 @@ from sklearn.metrics import (
     recall_score, roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.tree import DecisionTreeClassifier
 
 DATA_URL = (
     "https://raw.githubusercontent.com/ibrahimalfawaz/"
@@ -104,14 +108,22 @@ def evaluate(name, model, X_test, y_test) -> dict:
     }
 
 
-def chart_feature_importance(model, feature_names) -> None:
-    importances = model.named_steps["clf"].feature_importances_
+def chart_feature_importance(model, feature_names, model_name) -> None:
+    clf = model.named_steps["clf"]
+    if hasattr(clf, "feature_importances_"):
+        importances = clf.feature_importances_
+    elif hasattr(clf, "coef_"):
+        importances = np.abs(clf.coef_[0])
+    else:
+        print(f"Skipping feature-importance chart: {model_name} has neither "
+              "feature_importances_ nor coefficients.")
+        return
     idx = np.argsort(importances)[::-1][:15]
     fig, ax = plt.subplots(figsize=(8, 5.5))
     ax.barh([feature_names[i] for i in idx][::-1],
             importances[idx][::-1], color="#7f4f24")
     ax.set_xlabel("Importance")
-    ax.set_title("Top 15 features — Random Forest")
+    ax.set_title(f"Top 15 features — {model_name}")
     plt.tight_layout()
     fig.savefig(OUT / "feature_importance.png", dpi=150)
     plt.close(fig)
@@ -172,9 +184,17 @@ def main() -> None:
     models = {
         "Logistic Regression": LogisticRegression(
             max_iter=1000, class_weight="balanced"),
+        "Decision Tree": DecisionTreeClassifier(
+            class_weight="balanced", random_state=RANDOM_STATE),
         "Random Forest": RandomForestClassifier(
             n_estimators=300, class_weight="balanced_subsample",
             n_jobs=-1, random_state=RANDOM_STATE),
+        "Gradient Boosting": GradientBoostingClassifier(
+            random_state=RANDOM_STATE),
+        # KNN is distance-based, so it relies on the StandardScaler in the
+        # preprocessing pipeline. It has no class_weight, so the features
+        # being scaled is what gives it a fair comparison here.
+        "K-Nearest Neighbors": KNeighborsClassifier(n_neighbors=15),
     }
 
     results = []
@@ -187,12 +207,17 @@ def main() -> None:
         results.append(res)
         print(res)
 
+    # Screening choice: for follow-up triage, recall (catching true
+    # readmissions) matters most. The screening model is the one with the
+    # highest recall; ties/close calls are broken by ROC-AUC. This guards
+    # against a high-accuracy model that catches almost no one.
     best = max(results, key=lambda r: r["roc_auc"])
-    chart_confusion_matrix(np.array(best["confusion_matrix"]), best["model"])
+    screening = max(results, key=lambda r: (r["recall"], r["roc_auc"]))
+    chart_confusion_matrix(np.array(screening["confusion_matrix"]), screening["model"])
 
-    rf = fitted["Random Forest"]
-    feature_names = rf.named_steps["pre"].get_feature_names_out()
-    chart_feature_importance(rf, feature_names)
+    imp_pipe = fitted[screening["model"]]
+    feature_names = imp_pipe.named_steps["pre"].get_feature_names_out()
+    chart_feature_importance(imp_pipe, feature_names, screening["model"])
 
     summary = {
         "dataset_rows_full": full_rows,
@@ -202,6 +227,7 @@ def main() -> None:
         "positive_rate_full_dataset": full_pos_rate,
         "results": results,
         "best_model_by_roc_auc": best["model"],
+        "screening_model_highest_recall": screening["model"],
     }
 
     (OUT / "metrics.json").write_text(json.dumps(summary, indent=2))
@@ -219,6 +245,8 @@ def main() -> None:
             f.write(f"  confusion matrix (rows=actual No/Yes, cols=pred No/Yes): "
                     f"{r['confusion_matrix']}\n")
         f.write(f"\nBest by ROC-AUC: {summary['best_model_by_roc_auc']}\n")
+        f.write(f"Screening model (highest recall): "
+                f"{summary['screening_model_highest_recall']}\n")
     print("Saved outputs to", OUT)
 
 

@@ -22,7 +22,21 @@ Hospital readmissions are costly and often preventable. For diabetic patients, a
 2. Exploratory analysis (full dataset): readmission rate by age group and by prior inpatient visits.
 3. To keep run time manageable, train on a **stratified random sample of 30,000 encounters** (80/20 train/test split, stratified). The full 101,766 rows can be used by setting `SAMPLE_N = None` in the script.
 4. Preprocessing with a scikit-learn `ColumnTransformer` (scaling + one-hot encoding).
-5. Two models compared, both using balanced class weights: **Logistic Regression** and **Random Forest** (300 trees).
+5. Five classification algorithms compared with balanced handling of the minority class where the model supports it: **Logistic Regression**, **Decision Tree**, **Random Forest** (300 trees), **Gradient Boosting**, and **K-Nearest Neighbors** (k=15).
+
+## Machine Learning Algorithms Compared
+
+All five algorithms were trained on the same pipeline and evaluated on the same held-out test set (6,000 encounters, 11.2% positive):
+
+| Algorithm | Accuracy | Precision | Recall | F1 | ROC-AUC |
+|---|---|---|---|---|---|
+| **Logistic Regression** | 0.684 | 0.179 | **0.512** | **0.266** | **0.661** |
+| Decision Tree | 0.800 | 0.136 | 0.148 | 0.142 | 0.515 |
+| Random Forest | 0.888 | 0.333 | 0.002 | 0.003 | 0.626 |
+| Gradient Boosting | 0.889 | 0.600 | 0.013 | 0.026 | 0.661 |
+| K-Nearest Neighbors | 0.888 | 0.385 | 0.008 | 0.015 | 0.575 |
+
+**How to read this:** Gradient Boosting ties Logistic Regression on ROC-AUC (0.661) but at the default 0.5 threshold it flags almost nobody (recall 0.013). A single Decision Tree is the weakest ranker (ROC-AUC 0.515, close to random). Random Forest and K-Nearest Neighbors show the same high-accuracy/low-recall pattern. Logistic Regression is the only model that actually finds a meaningful share of the patients who will return, which is why it is this project's screening model (see below).
 
 ## Results (real, from `outputs/metrics.txt`)
 
@@ -31,24 +45,27 @@ Modeling sample: 30,000 encounters — train 24,000, test 6,000. Positive rate: 
 | Model | Accuracy | Precision | Recall | F1 | ROC-AUC |
 |---|---|---|---|---|---|
 | Logistic Regression | 0.684 | 0.179 | 0.512 | 0.266 | **0.661** |
+| Decision Tree | 0.800 | 0.136 | 0.148 | 0.142 | 0.515 |
 | Random Forest | 0.888 | 0.333 | 0.002 | 0.003 | 0.626 |
+| Gradient Boosting | 0.889 | 0.600 | 0.013 | 0.026 | 0.661 |
+| K-Nearest Neighbors | 0.888 | 0.385 | 0.008 | 0.015 | 0.575 |
 
 **How to read this honestly:**
-- Random Forest's 88.8% accuracy is misleading: it predicts almost everyone as "not readmitted" (recall ≈ 0), so it catches almost no real readmissions.
+- Random Forest's 88.8% accuracy is misleading: it predicts almost everyone as "not readmitted" (recall ≈ 0.002 — it catches 1 of 670 true readmissions), so it finds almost no real readmissions. Gradient Boosting (accuracy 0.889, recall 0.013) and K-Nearest Neighbors (accuracy 0.888, recall 0.008) show the same pattern.
 - Logistic Regression catches about **51%** of true 30-day readmissions (recall 0.512), at the cost of many false alarms (precision 0.179). For a screening/follow-up tool, recall usually matters more — missing a high-risk patient is worse than an extra follow-up call.
-- ROC-AUC ≈ 0.66 means the model ranks a random readmitted patient above a random non-readmitted one about 66% of the time: a useful baseline, not a deployable clinical tool.
+- ROC-AUC ≈ 0.66 (Logistic Regression and Gradient Boosting tie at 0.6605) means the model ranks a random readmitted patient above a random non-readmitted one about 66% of the time: a useful baseline, not a deployable clinical tool.
 
 **What the data shows (full dataset):**
 - Prior inpatient visits are the clearest signal: readmission rises from ~8.5% (0 prior visits) to ~13% (1), ~17% (2), and ~26% (3+).
 - Readmission rate is fairly flat (~10–12%) across adult age groups, slightly higher in the 20–30 group (~14%), and much lower in children.
-- Random Forest feature importance ranks `num_lab_procedures`, `num_medications`, `time_in_hospital`, `number_inpatient`, `num_procedures`, and `number_diagnoses` highest — all proxies for how sick/complex the patient was during the stay.
+- In the screening model (Logistic Regression), the largest coefficient magnitudes are discharge-disposition categories — how/where the patient left the hospital is strongly associated with return risk — while prior inpatient visits remain the clearest utilisation signal in the raw rates above. These are associations at discharge, not causes.
 
 ## Charts (in `outputs/`)
 
 - `readmission_rate_by_age.png` — readmission rate by age group
 - `readmission_rate_by_prior_inpatient.png` — readmission rate by prior inpatient visits
-- `feature_importance.png` — top 15 Random Forest features
-- `confusion_matrix.png` — confusion matrix for the best model (Logistic Regression)
+- `feature_importance.png` — top 15 features by logistic-regression coefficient magnitude (screening model)
+- `confusion_matrix.png` — confusion matrix for the screening model (Logistic Regression)
 
 ## How to run
 
@@ -62,7 +79,7 @@ Outputs are written to `outputs/` (`metrics.json`, `metrics.txt`, charts).
 
 ## Skills demonstrated
 
-Python, pandas, scikit-learn (pipelines, imputation, one-hot encoding, logistic regression, random forest), matplotlib, class-imbalance-aware evaluation, reproducible sampling.
+Python, pandas, scikit-learn (pipelines, imputation, one-hot encoding, logistic regression, decision tree, random forest, gradient boosting, K-nearest neighbors), matplotlib, class-imbalance-aware evaluation, reproducible sampling.
 
 ## Clinical interpretation
 
