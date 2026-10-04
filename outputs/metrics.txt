@@ -1,0 +1,11 @@
+Diabetes 30-day readmission prediction
+Full dataset: 101,766 encounters
+Positive rate (<30d readmission): 11.2%
+Modeling sample: 30,000 (train 24,000, test 6,000)
+
+Logistic Regression: accuracy=0.684, precision=0.1794, recall=0.5119, F1=0.2657, ROC-AUC=0.6605
+  confusion matrix (rows=actual No/Yes, cols=pred No/Yes): [[3761, 1569], [327, 343]]
+Random Forest: accuracy=0.8882, precision=0.3333, recall=0.0015, F1=0.003, ROC-AUC=0.6261
+  confusion matrix (rows=actual No/Yes, cols=pred No/Yes): [[5328, 2], [669, 1]]
+
+Best by ROC-AUC: Logistic Regression
